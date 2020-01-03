@@ -73,7 +73,7 @@ For ICFHR, as the alphabet can be different, you need to retrain the FC layer of
 Run [code/egs/iam-htr/src/create_one_split.py](code/egs/iam-htr/src/create_one_split.py) with the wanted folder as argument (for instance `python3 src/create_one_split.py data_washington`)
 to create one train/val/split of your dataset. 
 
-If you want to sampled a specific number of samples, run [code/egs/iam-htr/src/create_sample_split.py](code/egs/iam-htr/src/create_sample_split.py) by changing lines TODO In particular, the variable filename_tr_unlabel is only for SSL. 
+If you want to sampled a specific number of samples, run [code/egs/iam-htr/src/create_sample_split.py](code/egs/iam-htr/src/create_sample_split.py) by changing these [lines](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/egs/iam-htr/src/create_sampled_split.py#L42-L52).  In particular, the variable filename_tr_unlabel is only for SSL. 
 
 If you want a reduced dataset of the baseline, for instance to reproduce Baseline-30% of the report, run [code/egs/iam-htr/src/sample_baseline.py](code/egs/iam-htr/src/sample_baseline.py) (for instance `python3 src/sample_baseline.py data_washington 0.3 True`)
 
@@ -86,7 +86,7 @@ To get the final CER dictionnary, use [code/egs/iam-htr/src/merge_dict_score.py]
 
 Now, we can perform CL by using [code/egs/iam-htr/src/cl.sh](code/egs/iam-htr/src/cl.sh).
 
-To change the pacing function, modifiy those lines TODO.
+To change the pacing function, modifiy those [lines](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/pylaia-htr-train-ctc#L343-L346).
 
 To compute the Normalized Levenshtein Distance distribution, use the script [code/egs/iam-htr/src/hist_transfer.py](code/egs/iam-htr/src/hist_transfer.py).
 
@@ -94,13 +94,13 @@ To compute the Normalized Levenshtein Distance distribution, use the script [cod
 
 For the SSL, use the scripy [code/egs/iam-htr/src/semi_supervised_one_split.sh](code/egs/iam-htr/src/semi_supervised_one_split.sh).
 
-In order to use the spell checker, you need to download from the [original github](https://github.com/mammothb/symspellpy), the corpus file corresponding to the language of the used dataset. This file needs to be put at [code/egs/iam-htr/](code/egs/iam-htr/). The use of the spell checker during the training is at lines TODO.
+In order to use the spell checker, you need to download from the [original github](https://github.com/mammothb/symspellpy), the corpus file corresponding to the language of the used dataset. This file needs to be put at [code/egs/iam-htr/](code/egs/iam-htr/) and you need to change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L117). The use of the spell checker during the training is at these [lines](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L271-L279).
 
-To start the SSL after attaining a certain validation CER, change the threshold at TODO. Even if you want to do this, you need to precise non_decreasing_epochs_semi_supervised argument, you can put it high, for instance 100.
+To start the SSL after attaining a certain validation CER, change the threshold at this [lline](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/experiments/htr_experiment.py#L100). Even if you want to do this, you need to precise non_decreasing_epochs_semi_supervised argument, you can put it high, for instance 100.
 
-To change the fraction of dataset A used when using a dataset B as mentioned in the report, change the line TODO
+To change the number of samples of dataset A used when using a dataset B as mentioned in the report, change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L204).
 
-To change the metric used to rank the samples (entropy based or 'diff-proba'), change the line TODO
+To change the metric used to rank the samples (entropy based or 'diff-proba'), change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L219).
 
 
 ### Parameters of pylaia-htr-train-ctc
