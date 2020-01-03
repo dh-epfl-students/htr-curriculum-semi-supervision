@@ -24,7 +24,7 @@ SSl tries to use unlabelled data along with labelled data. We use the prediction
 
 
 ### Modification to PyLaia
-We have implemented the function on top of [Pylaia Code](https://github.com/jpuigcerver/PyLaia). In the [code](code/) folder, you will have the Pylaia Code. We have mainly modified some files listed below:
+We have implemented the function on top of [Pylaia Code](https://github.com/jpuigcerver/PyLaia). Some comments on the Pylaia Code and usage are given in [code/pylaia-explanation.md](code/pylaia-explanation.md). In the [code](code/) folder, you will have the Pylaia Code. We have mainly modified some files listed below:
 
 - [pylaia-htr-train-ctc](pylaia-htr-train-ctc)
 - [laia/engine/trainer.py](laia/engine/trainer.py)
@@ -70,31 +70,31 @@ For ICFHR, as the alphabet can be different, you need to retrain the FC layer of
 
 ### Baseline
 
-Run [code/egs/iam-htr/src/create_one_split.py]() with the wanted folder as argument (for instance `python3 src/create_one_split.py data_washington`)
+Run [code/egs/iam-htr/src/create_one_split.py](code/egs/iam-htr/src/create_one_split.py) with the wanted folder as argument (for instance `python3 src/create_one_split.py data_washington`)
 to create one train/val/split of your dataset. 
 
-If you want to sampled a specific number of samples, run [code/egs/iam-htr/src/create_sample_split.py]() by changing lines TODO In particular, the variable filename_tr_unlabel is only for SSL. 
+If you want to sampled a specific number of samples, run [code/egs/iam-htr/src/create_sample_split.py](code/egs/iam-htr/src/create_sample_split.py) by changing lines TODO In particular, the variable filename_tr_unlabel is only for SSL. 
 
-If you want a reduced dataset of the baseline, for instance to reproduce Baseline-30% of the report, run [code/egs/iam-htr/src/sample_baseline.py]() (for instance `python3 src/sample_baseline.py data_washington 0.3 True`)
+If you want a reduced dataset of the baseline, for instance to reproduce Baseline-30% of the report, run [code/egs/iam-htr/src/sample_baseline.py](code/egs/iam-htr/src/sample_baseline.py) (for instance `python3 src/sample_baseline.py data_washington 0.3 True`)
 
 ### Curriculum Learning
-To perform one run of CL, run [code/egs/iam-htr/src/train_one_split.sh]().
+To perform one run of CL, run [code/egs/iam-htr/src/train_one_split.sh](code/egs/iam-htr/src/train_one_split.sh).
 
-To create cross-validation splits, run [code/egs/iam-htr/src/cv_splits_creation.py]() with the data folder as argument. Then run the script [code/egs/iam-htr/src/transfer.sh]() to perform transfer learning cross-validation for CL. 
+To create cross-validation splits, run [code/egs/iam-htr/src/cv_splits_creation.py](code/egs/iam-htr/src/cv_splits_creation.py) with the data folder as argument. Then run the script [code/egs/iam-htr/src/transfer.sh](code/egs/iam-htr/src/transfer.sh) to perform transfer learning cross-validation for CL. 
 
-To get the final CER dictionnary, use [code/egs/iam-htr/src/merge_dict_score.py]() that merges the dictionnary that came from each of the cross-validation split.
+To get the final CER dictionnary, use [code/egs/iam-htr/src/merge_dict_score.py](code/egs/iam-htr/src/merge_dict_score.py) that merges the dictionnary that came from each of the cross-validation split.
 
-Now, we can perform CL by using [code/egs/iam-htr/src/cl.sh]().
+Now, we can perform CL by using [code/egs/iam-htr/src/cl.sh](code/egs/iam-htr/src/cl.sh).
 
 To change the pacing function, modifiy those lines TODO.
 
-To compute the Normalized Levenshtein Distance distribution, use the script [code/egs/iam-htr/src/hist_transfer.py]().
+To compute the Normalized Levenshtein Distance distribution, use the script [code/egs/iam-htr/src/hist_transfer.py](code/egs/iam-htr/src/hist_transfer.py).
 
 ### Semi-Supervised Learning
 
-For the SSL, use the scripy [code/egs/iam-htr/src/semi_supervised_one_split.sh]().
+For the SSL, use the scripy [code/egs/iam-htr/src/semi_supervised_one_split.sh](code/egs/iam-htr/src/semi_supervised_one_split.sh).
 
-In order to use the spell checker, you need to download from the [original github](https://github.com/mammothb/symspellpy), the corpus file corresponding to the language of the used dataset. This file needs to be put at [code/egs/iam-htr/](). The use of the spell checker during the training is at lines TODO.
+In order to use the spell checker, you need to download from the [original github](https://github.com/mammothb/symspellpy), the corpus file corresponding to the language of the used dataset. This file needs to be put at [code/egs/iam-htr/](code/egs/iam-htr/). The use of the spell checker during the training is at lines TODO.
 
 To start the SSL after attaining a certain validation CER, change the threshold at TODO. Even if you want to do this, you need to precise non_decreasing_epochs_semi_supervised argument, you can put it high, for instance 100.
 
