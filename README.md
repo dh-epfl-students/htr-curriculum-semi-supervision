@@ -10,12 +10,12 @@ Supervisor: Sofia Ares Oliveira
 Academic Year: Fall 2019
 
 ## Introduction
-Handwritten Text Recognition is challenging task when dealing with few samples only.  In this study, we tackle this difficult problem from the learning point of view. Transfer Learning has come to be very handy in such cases.  In order to improve the accuracy of this method, we explore two methods orthogonal to it:  Curriculum Learning and Semi-Supervised Learning.
+Handwritten Text Recognition is a challenging task when dealing with few samples only.  In this study, we tackle this difficult problem from the learning point of view. Transfer Learning has come to be very handy in such cases.  In order to improve the accuracy of this method, we explore two methods orthogonal to it:  Curriculum Learning and Semi-Supervised Learning.
 
 ## Research summary
 Many benchmarks have been done using TL. Building on top of this method, we explore two types of learning orthogonal to TL: Curriculum Learning (CL) and Semi-Supervised Learning (SSL).
 
-The former reshape how samples are presented to the learning algorithm. We compute a rank score using a cross-validation Transfer Learning taking the validation CER. Then, we use a single-step pacing function to choose the sample presented to the learning function.
+CL reshape how samples are presented to the learning algorithm. We compute a rank score using a cross-validation Transfer Learning taking the validation CER. Then, we use a single-step pacing function to choose the samples presented to the learning function.
 
 SSl tries to use unlabelled data along with labelled data. We use the prediction of the model as "fake" label of the unlabelled sampled. We take only those which have a good confidence score. This score is computed based on the entropy of the prediction or based on the difference between the two best probabilities at each timesteps. We use the labelled dataset as well as another dynamic dataset which is constructed using these 'fake' labels.
 
@@ -92,18 +92,24 @@ To compute the Normalized Levenshtein Distance distribution, use the script [cod
 
 ### Semi-Supervised Learning
 
-For the SSL, use the scripy [code/egs/iam-htr/src/semi_supervised_one_split.sh](code/egs/iam-htr/src/semi_supervised_one_split.sh).
+For the SSL, use the script [code/egs/iam-htr/src/semi_supervised_one_split.sh](code/egs/iam-htr/src/semi_supervised_one_split.sh).
 
-In order to use the spell checker, you need to download from the [original github](https://github.com/mammothb/symspellpy), the corpus file corresponding to the language of the used dataset. This file needs to be put at [code/egs/iam-htr/](code/egs/iam-htr/) and you need to change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L117). The use of the spell checker during the training is at these [lines](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L271-L279).
+In order to use the spell checker, you need to download from the [original github](https://github.com/mammothb/symspellpy), the corpus file corresponding to the language of the used dataset. This file needs to be put at [code/egs/iam-htr/](code/egs/iam-htr/) and you need to change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L117). 
 
-To start the SSL after attaining a certain validation CER, change the threshold at this [lline](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/experiments/htr_experiment.py#L100). Even if you want to do this, you need to precise non_decreasing_epochs_semi_supervised argument, you can put it high, for instance 100.
+The use of the spell checker during the training is at these [lines](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L271-L279).
+
+To start the SSL after attaining a certain validation CER, change the threshold at this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/experiments/htr_experiment.py#L100). If you want to do this, you still need to precise non_decreasing_epochs_semi_supervised argument: you can put it high, for instance 100.
 
 To change the number of samples of dataset A used when using a dataset B as mentioned in the report, change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L204).
 
 To change the metric used to rank the samples (entropy based or 'diff-proba'), change this [line](https://github.com/karna2605/htr-curriculum-semi-supervision/blob/741b5207aaf2f6886654a76afdb33a2349030127/code/laia/engine/trainer.py#L219).
 
 
-### Parameters of pylaia-htr-train-ctc
+### pylaia-htr-train-ctc and Shell
 
-We describe the combination of parameters of the pylaia-htr-train-ctc scripy used in all the shell script mentionned before.
+Basically the parameters of pylaia-htr-train-ctc need to be changed when launching a shell script. 
+**You can take [code/egs/iam-htr/src/semi_supervised_one_split.sh](code/egs/iam-htr/src/semi_supervised_one_split.sh) as a reference script and modify it to launch the code for different usage.**
 
+The other main thing to change in the shell scripts is the path to the right dataset for the training and validation split. You will also need to precise where the weights of the right model is, the directory of the images. The parameters are self-explanatory, be sure to give the right value depending on the usage you want.
+
+**Beware: Run setup.py install at each modification of a python file**
