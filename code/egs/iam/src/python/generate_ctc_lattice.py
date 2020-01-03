@@ -1,0 +1,1 @@
+../../../washington/src/python/generate_ctc_lattice.py

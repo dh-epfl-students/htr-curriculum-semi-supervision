@@ -1,0 +1,33 @@
+language: python
+dist: xenial
+sudo: true
+python:
+  - 3.5
+  - 3.6
+  - 3.7
+
+notifications:
+  email:
+    on_success: change
+    on_failure: always
+
+env:
+  matrix:
+    - PIP_PYTORCH_PKG="torch==1.1.0" PIP_TORCHVISION_PKG="torchvision==0.2.2"
+    - PIP_PYTORCH_PKG="torch" PIP_TORCHVISION_PKG="torchvision"
+
+before_install:
+  # Upgrade PIP to latest version, in order to support --progres-bar
+  - python -m pip install -U pip
+  # Restrict requirements to certain versions.
+  - echo "$PIP_PYTORCH_PKG" >  req_restrict.txt
+  - echo "$PIP_TORCHVISION_PKG" >> req_restrict.txt
+  - echo "tqdm==4.19.9" >> req_restrict.txt
+  # Install dependencies first.
+  - python -m pip install --progress-bar off -r requirements.txt -c req_restrict.txt
+
+install:
+  - python setup.py install
+
+script:
+  - ./travis/run_tests.sh

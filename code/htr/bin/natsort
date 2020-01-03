@@ -1,0 +1,12 @@
+#!/home/karna/Documents/HTR_DHLAB/PyLaia/htr/bin/python3
+# EASY-INSTALL-ENTRY-SCRIPT: 'natsort==6.0.0','console_scripts','natsort'
+__requires__ = 'natsort==6.0.0'
+import re
+import sys
+from pkg_resources import load_entry_point
+
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw?|\.exe)?$', '', sys.argv[0])
+    sys.exit(
+        load_entry_point('natsort==6.0.0', 'console_scripts', 'natsort')()
+    )

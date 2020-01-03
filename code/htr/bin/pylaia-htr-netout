@@ -1,0 +1,4 @@
+#!/home/karna/Documents/HTR_DHLAB/PyLaia/htr/bin/python3
+# EASY-INSTALL-SCRIPT: 'laia==0.1.0','pylaia-htr-netout'
+__requires__ = 'laia==0.1.0'
+__import__('pkg_resources').run_script('laia==0.1.0', 'pylaia-htr-netout')

@@ -1,0 +1,598 @@
+#!/usr/bin/env python
+from __future__ import absolute_import
+
+import argparse
+import multiprocessing
+import os
+import random
+
+import numpy
+import torch
+from torch.optim import RMSprop
+
+import laia.common.logging as log
+import laia.data.transforms as transforms
+from laia.common.arguments import add_argument, args, add_defaults
+from laia.common.arguments_types import NumberInClosedRange, str2bool, NumberInOpenRange
+from laia.common.loader import ModelLoader, StateCheckpointLoader, CheckpointLoader
+from laia.common.random import manual_seed
+from laia.common.saver import (
+    CheckpointSaver,
+    RollingSaver,
+    ModelCheckpointSaver,
+    StateCheckpointSaver,
+)
+from laia.conditions import Lowest, MultipleOf, GEqThan, ConsecutiveNonDecreasing
+from laia.data import ImageDataLoader, TextImageFromTextTableDataset, FixedSizeSampler, TestSampler, TestBatchSampler
+from laia.engine import Trainer, Evaluator
+from laia.engine.engine import EPOCH_END, EPOCH_START
+from laia.engine.feeders import ImageFeeder, ItemFeeder
+from laia.experiments.htr_experiment import HTRExperiment
+from laia.hooks import Hook, HookList, action, Action
+from laia.losses.ctc_loss import (
+    CTCLossImpl,
+    get_default_add_logsoftmax,
+    set_default_add_logsoftmax,
+    set_default_implementation,
+)
+from laia.utils import SymbolsTable
+
+import torch.nn as nn
+import editdistance
+import pickle
+from tqdm import tqdm
+
+def worker_init_fn(_):
+    # We need to reset the Numpy and Python PRNG, or we will get the
+    # same numbers in each epoch (when the workers are re-generated)
+    random.seed(torch.initial_seed() % 2 ** 31)
+    numpy.random.seed(torch.initial_seed() % 2 ** 31)
+
+
+if __name__ == "__main__":
+    add_defaults(
+        "batch_size",
+        "learning_rate",
+        "momentum",
+        "gpu",
+        "max_epochs",
+        "seed",
+        "show_progress_bar",
+        "train_path",
+        "train_samples_per_epoch",
+        "valid_samples_per_epoch",
+        "iterations_per_update",
+        "save_checkpoint_interval",
+        "num_rolling_checkpoints",
+        "use_distortions",
+    )
+    add_argument(
+        "syms",
+        type=argparse.FileType("r"),
+        help="Symbols table mapping from strings to integers.",
+    )
+    add_argument(
+        "img_dirs", type=str, nargs="+", help="Directory containing word images."
+    )
+    add_argument(
+        "tr_txt_table",
+        type=argparse.FileType("r"),
+        help="Character transcriptions of each training image.",
+    )
+    add_argument(
+            "va_txt_table",
+            type=argparse.FileType("r"),
+            help="Character transcriptions of each validation image.",
+    )
+    add_argument(
+            "--or_txt_table",
+            type=argparse.FileType("r"),
+            help="Character transcriptions of each training image.",
+   	)
+    
+    add_argument(
+        "--delimiters",
+        type=str,
+        nargs="+",
+        default=["<space>"],
+        help="Sequence of characters representing the word delimiters.",
+    )
+    add_argument(
+        "--max_nondecreasing_epochs",
+        type=NumberInClosedRange(int, vmin=0),
+        help="Stop the training once there has been this number "
+        "consecutive epochs without a new lowest validation CER.",
+    )
+    add_argument(
+        "--model_filename", type=str, default="model", help="File name of the model."
+    )
+    add_argument(
+        "--checkpoint",
+        type=str,
+        default="ckpt.lowest-valid-cer*",
+        help="Suffix of the checkpoint to use, can be a glob pattern.",
+    )
+    add_argument(
+        "--use_baidu_ctc",
+        type=str2bool,
+        nargs="?",
+        const=True,
+        default=False,
+        help="If true, use Baidu's implementation of the CTC loss.",
+    )
+    add_argument(
+        "--add_logsoftmax_to_loss",
+        type=str2bool,
+        nargs="?",
+        const=True,
+        default=get_default_add_logsoftmax(),
+        help="If true, add a logsoftmax operation before the CTC loss to normalize the activations.",
+    )
+    add_argument(
+        "--cv_number",
+        type=str,
+        default='',
+        help="Number CV split",
+    )
+
+    add_argument(
+        "--use_transfer",
+        type=str2bool,
+        default=False,
+        help="Use transfer Learning",
+    )
+
+    add_argument(
+        "--use_cl",
+        type=str2bool,
+        default=False,
+        help="Use curriculum Learning",
+    )
+
+    add_argument(
+        "--score_path",
+        type=str,
+        default='',
+    )
+
+    add_argument(
+        "--model_iam_path",
+        type=str,
+        default='',
+        help="Path to the IAM model for transfer learning",
+    )
+
+    add_argument(
+        "--dict_final",
+        type=str,
+        default='',
+        help="Path to the CER dictionnary coming from the cross-validated transfer learning"
+    )
+
+    add_argument(
+        "--train_batch_size",
+        type=NumberInClosedRange(type=int, vmin=1),
+        default=4,
+    )
+
+    add_argument(
+        "--val_batch_size",
+        type=NumberInClosedRange(type=int, vmin=1),
+        default=4,
+    )
+
+    add_argument(
+        "--use_baseline",
+        type=str2bool,
+        default=False,
+        help="Use baseline, no CL, no SSL",
+    )
+
+    add_argument(
+        "--total_nb_iterations",
+        type=NumberInClosedRange(type=int, vmin=1),
+        default=4,
+    )
+
+    add_argument(
+        "--use_different_alphabet",
+        type=str2bool,
+        default=False,
+        help="Use for instance for IAM training on a different alphabet in order to adapt the FC layer and use Transfer Learning afterwards",
+    )
+
+    add_argument(
+        "--weights",
+        type=str,
+        default="model.ckpt-last",
+        help="Weights of a full training on IAM",
+    )
+
+    add_argument(
+        "--use_reverse_cl",
+        type=str2bool,
+        default=False,
+        help="Use reverse curriculum Learning, use_cl needs to be True",
+    )
+
+    add_argument(
+        "--use_semi_supervised",
+        type=str2bool,
+        default=False,
+        help="Use semi-supervised Learning",
+    )
+
+    add_argument(
+        "--non_decreasing_epochs_semi_supervised",
+        type=NumberInOpenRange(type=int, vmin=0),
+        default=5,
+        help="Sort of Early Stopping for SSL before starting the SSL",
+    )
+
+    add_argument(
+        "--threshold_score_semi_supervised",
+        type=NumberInClosedRange(type=float, vmin=0,vmax=1),
+        default=0.1,
+        help="Threshold on the score for creating dataset B for SSL",
+    )
+
+    add_argument(
+        "--tr_unlabelled_txt_table",
+        type=argparse.FileType("r"),
+        help="Character transcriptions of each <fakely> unlabelled training image.",
+    )
+
+    add_argument(
+        "--epoch_frequency_semi_supervision",
+        type=NumberInOpenRange(type=int, vmin=0),
+        default=1,
+        help="Frequency of update of the SSL dataset B (the one which is not labelled), cf report",
+    )
+
+    args = args()
+
+    manual_seed(args.seed)
+    syms = SymbolsTable(args.syms)
+    device = torch.device("cuda:{}".format(args.gpu - 1) if args.gpu else "cpu")
+
+    # Set the default options for the CTCLoss.
+    set_default_add_logsoftmax(args.add_logsoftmax_to_loss)
+    if args.use_baidu_ctc:
+        set_default_implementation(CTCLossImpl.BAIDU)
+
+    model = ModelLoader(
+        args.model_iam_path, filename=args.model_filename, device=device
+    ).load()
+    if model is None:
+        log.error('Could not find the model. Have you run "pylaia-htr-create-model"?')
+        exit(1)
+    model = model.to(device)
+
+    default_img_transform = transforms.Compose(
+        [
+            transforms.vision.Convert("L"),
+            transforms.vision.Invert(),
+            transforms.vision.ToTensor(),
+        ]
+    )
+    if args.use_distortions:
+        tr_img_transform = transforms.Compose(
+            [
+                transforms.vision.Convert("L"),
+                transforms.vision.Invert(),
+                transforms.vision.RandomBetaAffine(),
+                transforms.vision.ToTensor(),
+            ]
+        )
+    else:
+        tr_img_transform = default_img_transform
+    log.info("Training data transforms:\n{}", str(tr_img_transform))
+
+    # If SSL, get the unlabelled dataset
+    if args.use_semi_supervised:
+        tr_semi_supervised_dataset = TextImageFromTextTableDataset(
+            args.tr_unlabelled_txt_table,
+            args.img_dirs,
+            img_transform=tr_img_transform,
+            txt_transform=transforms.text.ToTensor(syms),
+        )
+        tr_semi_supervised_dataset_loader = ImageDataLoader(
+            dataset=tr_semi_supervised_dataset,
+            image_channels=1,
+            batch_size=args.train_batch_size,
+            num_workers=multiprocessing.cpu_count(),
+            shuffle=not bool(args.train_samples_per_epoch),
+            sampler=FixedSizeSampler(tr_dataset, args.train_samples_per_epoch)
+            if args.train_samples_per_epoch
+            else None,
+            worker_init_fn=worker_init_fn,
+        )
+    else:
+        tr_semi_supervised_dataset_loader = None
+
+    tr_dataset = TextImageFromTextTableDataset(
+        args.tr_txt_table,
+        args.img_dirs,
+        img_transform=tr_img_transform,
+        txt_transform=transforms.text.ToTensor(syms),
+    )
+    
+    va_dataset = TextImageFromTextTableDataset(
+            args.va_txt_table,
+            args.img_dirs,
+            img_transform=default_img_transform,
+            txt_transform=transforms.text.ToTensor(syms),
+    )
+
+    # If SSL, get dataset A, the labelled one
+    if args.use_semi_supervised:
+        original_dataset = TextImageFromTextTableDataset(
+            	args.or_txt_table,
+            	args.img_dirs,
+            	img_transform=tr_img_transform,
+            	txt_transform=transforms.text.ToTensor(syms),
+        )
+
+    if args.use_cl:
+        print("Curriculum Learning")
+        # Load CER dictionnary 
+        with open(os.path.join(args.dict_final),'rb') as f:
+            dict_scores = pickle.load(f)
+
+        # Parameters for the pacing function
+        inc = 1.9
+        step_length = 100 #args.total_nb_iterations//2
+        starting_percent = 0.04
+        mode = 'fixed_exp'
+
+        n_batches = len(tr_dataset)//args.train_batch_size
+
+        tr_dataset_loader = ImageDataLoader(
+            dataset=tr_dataset,
+            image_channels=1,
+            num_workers=1,#multiprocessing.cpu_count(),
+            batch_sampler= TestBatchSampler(n_batches, args.train_batch_size, tr_dataset, va_dataset,  dict_scores, mode, starting_percent, step_length, inc, args.use_reverse_cl),
+            worker_init_fn=worker_init_fn,
+        )
+
+    else:
+        tr_dataset_loader = ImageDataLoader(
+            dataset=tr_dataset,
+            image_channels=1,
+            batch_size=args.train_batch_size,
+            num_workers=multiprocessing.cpu_count(),
+            shuffle=not bool(args.train_samples_per_epoch),
+            sampler=FixedSizeSampler(tr_dataset, args.train_samples_per_epoch)
+            if args.train_samples_per_epoch
+            else None,
+            worker_init_fn=worker_init_fn,
+        )
+
+        if args.use_semi_supervised:
+            original_data_loader = ImageDataLoader(
+                        dataset=original_dataset,
+                        image_channels=1,
+                        batch_size=args.train_batch_size,
+                        num_workers=multiprocessing.cpu_count(),
+                        shuffle=not bool(args.train_samples_per_epoch),
+                        sampler=FixedSizeSampler(tr_dataset, args.train_samples_per_epoch)
+                        if args.train_samples_per_epoch
+                        else None,
+                        worker_init_fn=worker_init_fn,
+                    )
+
+    # If we want to use a different alphabet, we have to properly reinitialize the FC layer 
+    if args.use_different_alphabet:
+        state = CheckpointLoader(device=device).load_by(
+            os.path.join(args.model_iam_path, args.weights)
+        )
+
+        model.load_state_dict(state)
+
+        # New FC layer according to the new syms table
+        in_ftrs = model.linear.in_features
+        out_ftrs = len(syms)
+        model.linear = nn.Linear(in_ftrs, out_ftrs)
+
+        parameter_not_to_freeze = ["linear.weight","linear.bias"]
+        
+        # We train only the FC layer
+        for name, param in model.named_parameters():
+            if name in parameter_not_to_freeze:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+        model = model.to(device)
+
+    # If we use Transfer Learning, we freeze all layers but the RNN and the FC ones
+    if args.use_transfer:
+        print("Transfer Learning")
+
+        state = CheckpointLoader(device=device).load_by(
+            os.path.join(args.model_iam_path, args.weights)
+        )
+
+        model.load_state_dict(state)
+        model = model.to(device)
+
+        parameter_not_to_freeze = ["linear.weight","linear.bias",\
+            "rnn.bias_hh_l4_reverse","rnn.bias_ih_l4_reverse","rnn.weight_hh_l4_reverse","rnn.weight_ih_l4_reverse","rnn.bias_hh_l4","rnn.bias_ih_l4","rnn.weight_hh_l4","rnn.weight_ih_l4"\
+            "rnn.bias_hh_l3_reverse","rnn.bias_ih_l3_reverse","rnn.weight_hh_l3_reverse","rnn.weight_ih_l3_reverse","rnn.bias_hh_l3","rnn.bias_ih_l3","rnn.weight_hh_l3","rnn.weight_ih_l3"\
+            "rnn.bias_hh_l2_reverse","rnn.bias_ih_l2_reverse","rnn.weight_hh_l2_reverse","rnn.weight_ih_l2_reverse","rnn.bias_hh_l2","rnn.bias_ih_l2","rnn.weight_hh_l2","rnn.weight_ih_l2"\
+            "rnn.bias_hh_l1_reverse","rnn.bias_ih_l1_reverse","rnn.weight_hh_l1_reverse","rnn.weight_ih_l1_reverse","rnn.bias_hh_l1","rnn.bias_ih_l1","rnn.weight_hh_l1","rnn.weight_ih_l1"\
+            "rnn.bias_hh_l0_reverse","rnn.bias_ih_l0_reverse","rnn.weight_hh_l0_reverse","rnn.weight_ih_l0_reverse","rnn.bias_hh_l0","rnn.bias_ih_l0","rnn.weight_hh_l0","rnn.weight_ih_l0"]
+
+        
+        for name, param in model.named_parameters():
+            if name in parameter_not_to_freeze:
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+        model = model.to(device)
+
+
+    trainer = Trainer(
+        model=model,
+        criterion=None,  # Set automatically by HTRExperiment
+        optimizer=RMSprop(
+            model.parameters(), lr=args.learning_rate, momentum=args.momentum
+        ),
+        data_loader=tr_dataset_loader,
+        batch_input_fn=ImageFeeder(device=device, parent_feeder=ItemFeeder("img")),
+        batch_target_fn=ItemFeeder("txt"),
+        batch_id_fn=ItemFeeder("id"),  # Print image ids on exception
+        progress_bar="Train" if args.show_progress_bar else None,
+        iterations_per_update=args.iterations_per_update,
+        cv_number=args.cv_number,
+        use_semi_supervised=args.use_semi_supervised,
+        threshold_score_semi_supervised=args.threshold_score_semi_supervised,
+        data_semi_supervised_loader=tr_semi_supervised_dataset_loader,
+        epoch_frequency_semi_supervision=args.epoch_frequency_semi_supervision,
+        syms=syms,
+        original_data_loader=original_data_loader if args.use_semi_supervised else None,
+    )
+    
+    va_dataset_loader = ImageDataLoader(
+        dataset=va_dataset,
+        image_channels=1,
+        batch_size=args.val_batch_size,
+        num_workers=multiprocessing.cpu_count(),
+        sampler=FixedSizeSampler(va_dataset, args.valid_samples_per_epoch)
+        if args.valid_samples_per_epoch
+        else None,
+    )
+    evaluator = Evaluator(
+        model=model,
+        data_loader=va_dataset_loader,
+        batch_input_fn=ImageFeeder(device=device, parent_feeder=ItemFeeder("img")),
+        batch_target_fn=ItemFeeder("txt"),
+        batch_id_fn=ItemFeeder("id"),
+        progress_bar="Valid" if args.show_progress_bar else None,
+        total_nb_iterations=args.total_nb_iterations,
+        use_baseline=args.use_baseline,
+        use_cl=args.use_cl,
+        use_transfer=args.use_transfer
+    )
+
+    experiment = HTRExperiment(
+        trainer, evaluator, word_delimiters=[syms[sym] for sym in args.delimiters],\
+            use_baseline=args.use_baseline,use_cl=args.use_cl,use_transfer=args.use_transfer,\
+        use_semi_supervised=args.use_semi_supervised,
+    )
+
+    if args.max_nondecreasing_epochs:
+        # Stop when the validation CER hasn't improved in
+        # `max_nondecreasing_epochs` consecutive epochs
+        trainer.add_hook(
+            EPOCH_END,
+            Hook(
+                ConsecutiveNonDecreasing(
+                    experiment.valid_cer(), args.max_nondecreasing_epochs
+                ),
+                trainer.stop,
+            ),
+        )
+
+    # Start SSL if no improvement after non_decreasing_epochs_semi_supervised epochs
+    # The SSL will be started otherwise if below the given validation CER
+    if args.use_semi_supervised:
+        evaluator.add_hook(
+            EPOCH_END,
+            Hook(
+                ConsecutiveNonDecreasing(
+                    experiment.valid_cer(), args.non_decreasing_epochs_semi_supervised
+                ),
+                trainer.start_semi_supervision,
+            ),
+        )
+        
+    if args.max_epochs:
+        # Stop when `max_epochs` has been reached
+        trainer.add_hook(
+            EPOCH_START, Hook(GEqThan(trainer.epochs, args.max_epochs), trainer.stop)
+        )
+
+    if args.use_cl or (args.use_transfer and not args.use_different_alphabet and not args.use_baseline):
+        print("------------ Cross-Validation: " + str(args.cv_number) + "---------------")
+
+
+    def ckpt_saver(filename, obj):
+        return RollingSaver(
+            StateCheckpointSaver(
+                CheckpointSaver(os.path.join(args.train_path, filename)),
+                obj,
+                device=device,
+            ),
+            keep=args.num_rolling_checkpoints,
+        )
+
+
+    # Uncomment if the training is too long, to save each time a lowest validation CER is attained
+    #saver_best_cer = ckpt_saver("experiment.ckpt.lowest-valid-cer", experiment)
+
+    @action
+    def save(saver, epoch):
+        saver.save(suffix=epoch)
+
+    # Uncomment if the training is too long, to save checkpoints
+    # Set hooks
+    #trainer.add_hook(
+    #    EPOCH_END,
+    #    HookList(
+    #        # Save on best CER
+    #        Hook(Lowest(experiment.valid_cer()), Action(save, saver=saver_best_cer)),
+    #    ),
+    #)
+
+    # Continue from the given checkpoint, if possible
+    StateCheckpointLoader(experiment, device=device).load_by(
+        os.path.join(args.train_path, "experiment.{}".format(args.checkpoint))
+    )
+
+    print(model)
+    experiment.run()
+
+    # Save validation CER for the plots
+    if len(list(experiment.va_cer_dict.values())) != 0:
+        filename = "results_baseline_" + str(args.use_baseline) + "_cl_" + str(args.use_cl) + "_transfer_" + str(args.use_transfer) + "_reverse_" + str(args.use_reverse_cl) + "_semi_supervision_" + str(args.use_semi_supervised)
+        with open(filename,'wb') as f:
+            pickle.dump(experiment.va_cer_dict, f)
+
+    # Experiment finished. Save the model separately
+    if args.use_different_alphabet or (not args.use_different_alphabet and not args.use_cl and not args.use_transfer and not args.use_baseline):
+        ModelCheckpointSaver(
+            CheckpointSaver(os.path.join(args.model_iam_path, "model_"+str(len(syms))+'.ckpt')), model
+        ).save(suffix="last")
+
+    # Save CER dictionnary of the transfer learning
+    if args.use_transfer and not args.use_cl and not args.use_baseline:
+        model.eval()
+
+        evaluator = Evaluator(
+            model=model,
+            data_loader=va_dataset_loader,
+            batch_input_fn=ImageFeeder(device=device, parent_feeder=ItemFeeder("img")),
+            batch_target_fn=ItemFeeder("txt"),
+            batch_id_fn=ItemFeeder("id"),
+            progress_bar="Valid" if args.show_progress_bar else None,
+        )
+
+        dict_score = {}
+
+        batch_iterator = tqdm(va_dataset_loader,desc="dict creation")
+        for it, batch in enumerate(batch_iterator, 1):
+            batch_output, batch_target = evaluator._run_iteration_output(it, batch)
+            batch_decode = experiment._decode_output(batch_output)
+            batch_id = evaluator.batch_id_fn(batch)
+            for target, decoded, _id in zip(batch_target, batch_decode, batch_id):
+                dict_score[_id] = editdistance.eval(target, decoded)/len(target)
+
+        if args.use_transfer:
+            filename = 'dict_score_transfer_'+str(args.cv_number)+'.pkl'
+        else:
+            filename = 'dict_score_bootstrap_'+str(args.cv_number)+'.pkl'
+
+        with open(os.path.join(args.score_path, filename),'wb') as handle:
+            pickle.dump(dict_score,handle)

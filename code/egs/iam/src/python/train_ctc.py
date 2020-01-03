@@ -1,0 +1,1 @@
+../../../washington/src/python/train_ctc.py
