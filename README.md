@@ -116,5 +116,7 @@ The other main thing to change in the shell scripts is the path to the right dat
 
 ### Licence
 htr-curriculum-semi-supervision - Karthigan Sinnathamby
+
 Copyright (c) 2019 EPFL
+
 This program is licensed under the terms of the [licence](LICENCE).
