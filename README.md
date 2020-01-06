@@ -119,4 +119,4 @@ htr-curriculum-semi-supervision - Karthigan Sinnathamby
 
 Copyright (c) 2019 EPFL
 
-This program is licensed under the terms of the [licence](LICENCE).
+This program is licensed under the terms of this [licence](LICENSE).
