@@ -113,3 +113,8 @@ Basically the parameters of pylaia-htr-train-ctc need to be changed when launchi
 The other main thing to change in the shell scripts is the path to the right dataset for the training and validation split. You will also need to precise where the weights of the right model is, the directory of the images. The parameters are self-explanatory, be sure to give the right value depending on the usage you want.
 
 **Beware: Run setup.py install at each modification of a python file**
+
+### Licence
+htr-curriculum-semi-supervision - Karthigan Sinnathamby
+Copyright (c) 2019 EPFL
+This program is licensed under the terms of the [licence](LICENCE).
